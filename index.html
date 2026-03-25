@@ -1,0 +1,1973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Android Calculator — Interactive Deep Dive</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b0d14;
+  --surface: #12161f;
+  --surface2: #1a2030;
+  --border: rgba(255,255,255,0.07);
+  --border-bright: rgba(99,210,255,0.35);
+  --text: #e8edf5;
+  --muted: #7a8aa0;
+  --accent: #63d2ff;
+  --accent2: #b57bff;
+  --accent3: #6af0b0;
+  --accent4: #ffb347;
+  --red: #ff6b6b;
+  --font-mono: 'Space Mono', monospace;
+  --font-body: 'DM Sans', sans-serif;
+  --font-display: 'DM Serif Display', serif;
+  --radius: 16px;
+  --shadow: 0 24px 60px rgba(0,0,0,0.6);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+
+/* ── NOISE TEXTURE ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── AMBIENT GLOW ── */
+.glow-orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.18;
+}
+.glow-orb-1 { width: 600px; height: 600px; background: var(--accent2); top: -200px; right: -200px; }
+.glow-orb-2 { width: 500px; height: 500px; background: var(--accent); bottom: 10%; left: -150px; }
+
+/* ── LAYOUT ── */
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 24px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── HEADER ── */
+header {
+  padding: 80px 0 60px;
+  text-align: center;
+  position: relative;
+}
+
+.header-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(99,210,255,0.1);
+  border: 1px solid rgba(99,210,255,0.25);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border-radius: 40px;
+  margin-bottom: 24px;
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2.2rem, 5vw, 3.5rem);
+  line-height: 1.15;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, #fff 30%, var(--accent) 70%, var(--accent2) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-sub {
+  color: var(--muted);
+  font-size: 1.05rem;
+  max-width: 600px;
+  margin: 0 auto 40px;
+}
+
+/* ── PROGRESS BAR ── */
+.progress-bar {
+  position: fixed;
+  top: 0; left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent2), var(--accent), var(--accent3));
+  z-index: 999;
+  transition: width 0.1s linear;
+  box-shadow: 0 0 12px var(--accent);
+}
+
+/* ── NAV PILLS ── */
+.nav-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 60px;
+}
+
+.nav-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 8px 16px;
+  border-radius: 40px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.nav-pill:hover, .nav-pill.active {
+  border-color: var(--border-bright);
+  color: var(--accent);
+  background: rgba(99,210,255,0.07);
+}
+
+/* ── SECTION CARDS ── */
+.section-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 36px;
+  margin-bottom: 28px;
+  transition: border-color 0.3s, transform 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.section-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.section-card:hover { border-color: var(--border-bright); }
+.section-card:hover::before { opacity: 1; }
+
+.section-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+  display: block;
+}
+
+h2 {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  margin-bottom: 16px;
+  line-height: 1.25;
+}
+
+h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--accent3);
+  margin: 24px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+p { color: #b8c5d5; margin-bottom: 14px; }
+
+/* ── CODE BLOCKS ── */
+.code-wrap {
+  background: #080b12;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 16px 0;
+  position: relative;
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.code-dots { display: flex; gap: 6px; }
+.code-dot { width: 10px; height: 10px; border-radius: 50%; }
+.dot-r { background: #ff5f57; }
+.dot-y { background: #ffbd2e; }
+.dot-g { background: #28c840; }
+
+.copy-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+pre {
+  padding: 20px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  color: #c9d1e0;
+}
+
+.kw { color: #ff79c6; }
+.cn { color: #50fa7b; }
+.st { color: #f1fa8c; }
+.cm { color: #565f89; font-style: italic; }
+.nm { color: #bd93f9; }
+.at { color: #63d2ff; }
+.fn { color: #ffb86c; }
+
+/* ── INLINE HIGHLIGHT ── */
+code {
+  background: rgba(99,210,255,0.1);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid rgba(99,210,255,0.15);
+}
+
+/* ── CALLOUT BOXES ── */
+.callout {
+  display: flex;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin: 16px 0;
+  font-size: 0.93rem;
+  line-height: 1.6;
+}
+.callout-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 1px; }
+.callout-info { background: rgba(99,210,255,0.07); border: 1px solid rgba(99,210,255,0.18); }
+.callout-info .callout-icon::before { content: '💡'; }
+.callout-warn { background: rgba(255,179,71,0.07); border: 1px solid rgba(255,179,71,0.2); }
+.callout-warn .callout-icon::before { content: '⚠️'; }
+.callout-tip { background: rgba(106,240,176,0.07); border: 1px solid rgba(106,240,176,0.2); }
+.callout-tip .callout-icon::before { content: '✅'; }
+
+/* ── EXPANDABLE / ACCORDION ── */
+.accordion {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 12px 0;
+  overflow: hidden;
+}
+
+.accordion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  cursor: pointer;
+  background: var(--surface2);
+  transition: background 0.2s;
+  user-select: none;
+  font-weight: 500;
+}
+.accordion-header:hover { background: rgba(99,210,255,0.05); }
+
+.accordion-arrow {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  transition: transform 0.3s;
+  flex-shrink: 0;
+}
+
+.accordion.open .accordion-arrow { transform: rotate(180deg); }
+
+.accordion-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.accordion.open .accordion-body { max-height: 2000px; }
+
+.accordion-content { padding: 20px; border-top: 1px solid var(--border); }
+
+/* ── INTERACTIVE CODE EXPLORER ── */
+.explorer {
+  background: #080b12;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 20px 0;
+}
+
+.explorer-tabs {
+  display: flex;
+  gap: 0;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.exp-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 10px 18px;
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  transition: all 0.2s;
+  white-space: nowrap;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-bottom: 2px solid transparent;
+}
+.exp-tab:hover { color: var(--text); }
+.exp-tab.active {
+  color: var(--accent);
+  background: rgba(99,210,255,0.05);
+  border-bottom-color: var(--accent);
+}
+
+.exp-pane { display: none; }
+.exp-pane.active { display: block; }
+
+/* ── METHOD CARDS ── */
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.method-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+.method-card:hover {
+  border-color: var(--border-bright);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.method-card::after {
+  content: 'Click for details →';
+  position: absolute;
+  bottom: 10px; right: 12px;
+  font-size: 10px;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.method-card:hover::after { opacity: 1; }
+
+.method-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent3);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.method-trigger {
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(99,210,255,0.1);
+  border: 1px solid rgba(99,210,255,0.15);
+  padding: 2px 8px;
+  border-radius: 20px;
+  display: inline-block;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+}
+.method-desc { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+
+/* ── TABLE ── */
+.table-wrap { overflow-x: auto; margin: 16px 0; border-radius: 12px; border: 1px solid var(--border); }
+
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.03);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  color: #b8c5d5;
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(255,255,255,0.015); }
+
+/* ── MODAL ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+.modal-overlay.open {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-radius: 20px;
+  max-width: 680px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  transform: scale(0.9) translateY(20px);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(99,210,255,0.1);
+}
+.modal-overlay.open .modal {
+  transform: scale(1) translateY(0);
+}
+
+.modal-header {
+  padding: 28px 28px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+}
+
+.modal-close {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.modal-close:hover { border-color: var(--red); color: var(--red); }
+
+.modal-body { padding: 24px 28px 28px; }
+
+/* ── QUIZ ── */
+.quiz-wrap {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px;
+  margin: 20px 0;
+}
+
+.quiz-q {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+
+.quiz-options { display: flex; flex-direction: column; gap: 10px; }
+
+.quiz-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+  color: #b8c5d5;
+  background: var(--surface);
+}
+.quiz-opt:hover { border-color: var(--border-bright); color: var(--text); }
+.quiz-opt.correct { border-color: var(--accent3); background: rgba(106,240,176,0.08); color: var(--accent3); }
+.quiz-opt.wrong { border-color: var(--red); background: rgba(255,107,107,0.08); color: var(--red); }
+
+.quiz-badge {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+
+.quiz-feedback {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  display: none;
+}
+.quiz-feedback.show { display: block; }
+.quiz-feedback.ok { background: rgba(106,240,176,0.1); border: 1px solid rgba(106,240,176,0.25); color: var(--accent3); }
+.quiz-feedback.bad { background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.25); color: var(--red); }
+
+/* ── CALCULATOR SIMULATOR ── */
+.calc-sim {
+  background: #1a1a2e;
+  border-radius: 24px;
+  padding: 20px;
+  max-width: 320px;
+  margin: 20px auto;
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+
+.calc-display {
+  background: #0a0a18;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  text-align: right;
+  font-family: var(--font-mono);
+  min-height: 70px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.calc-expr { font-size: 12px; color: var(--muted); min-height: 18px; }
+.calc-val { font-size: 32px; color: var(--text); }
+
+.calc-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.calc-btn {
+  padding: 14px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  transition: all 0.12s;
+  outline: none;
+}
+.calc-btn:active { transform: scale(0.93); }
+
+.cbtn-num { background: #2a2a42; color: var(--text); }
+.cbtn-num:hover { background: #363654; }
+.cbtn-op { background: rgba(181,123,255,0.25); color: var(--accent2); border: 1px solid rgba(181,123,255,0.3); }
+.cbtn-op:hover { background: rgba(181,123,255,0.4); }
+.cbtn-fn { background: rgba(99,210,255,0.15); color: var(--accent); border: 1px solid rgba(99,210,255,0.2); }
+.cbtn-fn:hover { background: rgba(99,210,255,0.25); }
+.cbtn-eq { background: var(--accent2); color: white; }
+.cbtn-eq:hover { background: #c99aff; }
+.cbtn-custom { background: rgba(255,179,71,0.15); color: var(--accent4); border: 1px solid rgba(255,179,71,0.2); font-size: 11px; }
+.cbtn-custom:hover { background: rgba(255,179,71,0.28); }
+
+.sim-log {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(0,0,0,0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 14px;
+  min-height: 44px;
+  max-height: 120px;
+  overflow-y: auto;
+  line-height: 1.7;
+}
+
+.log-entry { color: var(--accent3); }
+.log-entry.info { color: var(--accent); }
+.log-entry.warn { color: var(--accent4); }
+
+/* ── STATE TRACKER ── */
+.state-tracker {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.state-item {
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.state-label { color: var(--muted); font-size: 10px; margin-bottom: 2px; }
+.state-val { color: var(--accent3); }
+
+/* ── CONSTRAINT VISUAL ── */
+.constraint-demo {
+  position: relative;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 16px 0;
+  background: rgba(0,0,0,0.2);
+  min-height: 200px;
+}
+
+.constraint-label {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--accent4);
+  background: rgba(255,179,71,0.12);
+  border: 1px solid rgba(255,179,71,0.25);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.c-parent-label { top: -8px; left: 12px; }
+
+.c-display {
+  background: rgba(99,210,255,0.1);
+  border: 2px solid rgba(99,210,255,0.4);
+  border-radius: 8px;
+  padding: 10px 16px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  color: var(--accent);
+  margin-bottom: 16px;
+  position: relative;
+}
+
+.c-theme-btn {
+  position: absolute;
+  top: 4px; right: 4px;
+  background: rgba(181,123,255,0.15);
+  border: 1px solid rgba(181,123,255,0.3);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--accent2);
+  cursor: default;
+}
+
+.c-grid {
+  background: rgba(106,240,176,0.06);
+  border: 2px solid rgba(106,240,176,0.3);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.c-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 4px;
+  text-align: center;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.annotation-line {
+  position: absolute;
+  background: var(--accent4);
+  opacity: 0.5;
+}
+
+/* ── CHIP BADGES ── */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 30px;
+  border: 1px solid;
+}
+.chip-blue { background: rgba(99,210,255,0.08); color: var(--accent); border-color: rgba(99,210,255,0.2); }
+.chip-purple { background: rgba(181,123,255,0.08); color: var(--accent2); border-color: rgba(181,123,255,0.2); }
+.chip-green { background: rgba(106,240,176,0.08); color: var(--accent3); border-color: rgba(106,240,176,0.2); }
+.chip-orange { background: rgba(255,179,71,0.08); color: var(--accent4); border-color: rgba(255,179,71,0.2); }
+
+/* ── TOOLTIP ── */
+.tip {
+  position: relative;
+  display: inline-block;
+  border-bottom: 1px dashed var(--accent);
+  cursor: help;
+  color: var(--accent);
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface2);
+  border: 1px solid var(--border-bright);
+  color: var(--text);
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+  max-width: 280px;
+  white-space: normal;
+  width: max-content;
+  max-width: 260px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 100;
+  font-family: var(--font-body);
+  font-style: normal;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  line-height: 1.4;
+}
+.tip:hover::after { opacity: 1; }
+
+/* ── FLOW DIAGRAM ── */
+.flow {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+.flow-step {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  text-align: center;
+}
+.flow-step.highlight-step {
+  border-color: var(--accent2);
+  background: rgba(181,123,255,0.1);
+  color: var(--accent2);
+}
+.flow-arrow {
+  color: var(--muted);
+  font-size: 18px;
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+
+/* ── FOOTER ── */
+footer {
+  text-align: center;
+  padding: 60px 0 40px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+footer .footer-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+/* ── SCROLL ANIMATION ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.5s, transform 0.5s;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 640px) {
+  .section-card { padding: 24px 20px; }
+  .method-grid { grid-template-columns: 1fr 1fr; }
+  .state-tracker { grid-template-columns: 1fr; }
+  header { padding: 50px 0 40px; }
+}
+</style>
+</head>
+<body>
+
+<div class="glow-orb glow-orb-1"></div>
+<div class="glow-orb glow-orb-2"></div>
+<div class="progress-bar" id="progressBar"></div>
+
+<!-- MODAL OVERLAY -->
+<div class="modal-overlay" id="methodModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="method-trigger" id="modalTrigger">trigger</div>
+        <div class="modal-title" id="modalTitle">Method</div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<div class="container">
+  <!-- HEADER -->
+  <header>
+    <div class="header-label">📱 Android Dev · Calculator App</div>
+    <h1>Layout + Logic<br><em>Deep Dive</em></h1>
+    <p class="hero-sub">An interactive walkthrough of every XML constraint, lifecycle method, and calculator algorithm. Click anything to explore further.</p>
+
+    <nav class="nav-pills">
+      <a href="#xml-layout" class="nav-pill">📐 XML Layout</a>
+      <a href="#activity" class="nav-pill">🧠 Activity</a>
+      <a href="#lifecycle" class="nav-pill">🔄 Lifecycle</a>
+      <a href="#methods" class="nav-pill">⚙️ Methods</a>
+      <a href="#simulator" class="nav-pill">▶ Simulator</a>
+      <a href="#theme" class="nav-pill">🎨 Theme</a>
+      <a href="#quiz" class="nav-pill">🧪 Quiz</a>
+    </nav>
+  </header>
+
+  <!-- ── SECTION 1: XML LAYOUT ── -->
+  <div class="section-card reveal" id="xml-layout">
+    <span class="section-num">01 / XML LAYOUT</span>
+    <h2>Why Each Constraint Matters</h2>
+    <p>The UI uses <span class="tip" data-tip="A layout manager that lets you position views relative to each other or the parent, with a flat (non-nested) view hierarchy for performance.">ConstraintLayout</span> as the root container for flat, performant positioning. Inside it lives a <span class="tip" data-tip="Places children in a rectangular grid. You specify columnCount and rowCount; children fill cells in order.">GridLayout</span> for the button matrix and a <code>TextView</code> for the display.</p>
+
+    <div class="chips">
+      <span class="chip chip-blue">ConstraintLayout → root</span>
+      <span class="chip chip-purple">GridLayout → buttons</span>
+      <span class="chip chip-green">0dp = match_constraint</span>
+      <span class="chip chip-orange">ViewBinding → type-safe refs</span>
+    </div>
+
+    <!-- INTERACTIVE CONSTRAINT VISUAL -->
+    <h3>📐 Live Constraint Map</h3>
+    <p style="font-size:0.88rem; color:var(--muted);">Hover over the colored boxes to understand each element's constraints.</p>
+
+    <div class="constraint-demo">
+      <span class="constraint-label c-parent-label">ConstraintLayout (parent)</span>
+
+      <div class="c-display" title="tvDisplay: top→parent, left→parent, right→parent, width=0dp (match_constraint)">
+        <span style="font-size:13px; color:var(--muted); position:absolute; bottom:-22px; left:0; right:0; text-align:center; font-family:var(--font-mono); font-size:10px">tvDisplay — top+left+right to parent, width=0dp → full width</span>
+        123
+        <span class="c-theme-btn">🌙</span>
+      </div>
+      <div style="height:28px"></div>
+
+      <div class="c-grid" title="GridLayout: top→tvDisplay bottom, bottom→parent bottom, left+right to parent">
+        <div class="c-btn">AC</div>
+        <div class="c-btn">+/-</div>
+        <div class="c-btn">%</div>
+        <div class="c-btn">÷</div>
+        <div class="c-btn">7</div>
+        <div class="c-btn">8</div>
+        <div class="c-btn">9</div>
+        <div class="c-btn">×</div>
+        <div class="c-btn">4</div>
+        <div class="c-btn">5</div>
+        <div class="c-btn">6</div>
+        <div class="c-btn">−</div>
+        <div class="c-btn">×1.08</div>
+        <div class="c-btn">0</div>
+        <div class="c-btn">.</div>
+        <div class="c-btn">=</div>
+      </div>
+      <div style="margin-top:8px; font-family:var(--font-mono); font-size:10px; color:var(--accent3); text-align:center">
+        GridLayout — top_toBottomOf tvDisplay, bottom_toBottomOf parent, fills remaining space
+      </div>
+    </div>
+
+    <!-- ACCORDIONS -->
+    <h3>🔍 Constraint Deep Dives</h3>
+
+    <div class="accordion" id="acc1">
+      <div class="accordion-header" onclick="toggleAccordion('acc1')">
+        <span>📺 <code>tvDisplay</code> — Why width=<code>0dp</code>?</span>
+        <div class="accordion-arrow">▼</div>
+      </div>
+      <div class="accordion-body">
+        <div class="accordion-content">
+          <p>Setting <code>layout_width="0dp"</code> in ConstraintLayout means <strong>"match constraint"</strong> — the view expands to fill the space defined by its left and right constraints. Since both are anchored to parent, it becomes full-width on any screen size.</p>
+          <div class="callout callout-info">
+            <div class="callout-icon"></div>
+            <div>This is the ConstraintLayout equivalent of <code>match_parent</code>, but works relative to <em>constraints</em> rather than just the parent. If the right constraint was anchored to a button instead of the parent, the display would stop there.</div>
+          </div>
+          <div class="code-wrap">
+            <div class="code-header">
+              <div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div>
+              <span>activity_main.xml</span>
+              <button class="copy-btn" onclick="copyCode(this)">copy</button>
+            </div>
+            <pre><span class="at">&lt;TextView</span>
+    <span class="nm">android:id</span>=<span class="st">"@+id/tvDisplay"</span>
+    <span class="nm">android:layout_width</span>=<span class="st">"0dp"</span>          <span class="cm">← match_constraint</span>
+    <span class="nm">android:layout_height</span>=<span class="st">"wrap_content"</span>
+    <span class="nm">android:gravity</span>=<span class="st">"end"</span>              <span class="cm">← numbers align right</span>
+    <span class="nm">android:textSize</span>=<span class="st">"48sp"</span>
+    <span class="nm">android:maxLines</span>=<span class="st">"2"</span>
+    <span class="nm">android:ellipsize</span>=<span class="st">"start"</span>         <span class="cm">← truncate from left</span>
+    <span class="nm">app:layout_constraintTop_toTopOf</span>=<span class="st">"parent"</span>
+    <span class="nm">app:layout_constraintLeft_toLeftOf</span>=<span class="st">"parent"</span>
+    <span class="nm">app:layout_constraintRight_toRightOf</span>=<span class="st">"parent"</span><span class="at">/&gt;</span></pre>
+          </div>
+          <p><code>ellipsize="start"</code> means very long numbers get truncated at the <em>start</em> (e.g., <code>...456789</code>), preserving the most recent digits — exactly right for a calculator.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="accordion" id="acc2">
+      <div class="accordion-header" onclick="toggleAccordion('acc2')">
+        <span>🟦 <code>GridLayout</code> — How it fills remaining space</span>
+        <div class="accordion-arrow">▼</div>
+      </div>
+      <div class="accordion-body">
+        <div class="accordion-content">
+          <p>The GridLayout uses <strong>four constraints</strong> simultaneously to fill all remaining vertical and horizontal space:</p>
+          <div class="flow">
+            <div class="flow-step highlight-step">top → bottom of tvDisplay</div>
+            <div class="flow-arrow">+</div>
+            <div class="flow-step highlight-step">bottom → parent bottom</div>
+            <div class="flow-arrow">+</div>
+            <div class="flow-step">left → parent left</div>
+            <div class="flow-arrow">+</div>
+            <div class="flow-step">right → parent right</div>
+          </div>
+          <div class="callout callout-info">
+            <div class="callout-icon"></div>
+            <div>With <code>width=0dp</code> + <code>height=0dp</code>, and constraints on all four sides, the GridLayout expands to fill every remaining pixel — on any phone or tablet. This is the power of ConstraintLayout over LinearLayout.</div>
+          </div>
+          <div class="code-wrap">
+            <div class="code-header">
+              <div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div>
+              <span>activity_main.xml</span>
+              <button class="copy-btn" onclick="copyCode(this)">copy</button>
+            </div>
+            <pre><span class="at">&lt;GridLayout</span>
+    <span class="nm">android:layout_width</span>=<span class="st">"0dp"</span>
+    <span class="nm">android:layout_height</span>=<span class="st">"0dp"</span>
+    <span class="nm">android:columnCount</span>=<span class="st">"4"</span>
+    <span class="nm">android:rowCount</span>=<span class="st">"6"</span>
+    <span class="nm">app:layout_constraintTop_toBottomOf</span>=<span class="st">"@id/tvDisplay"</span>
+    <span class="nm">app:layout_constraintBottom_toBottomOf</span>=<span class="st">"parent"</span>
+    <span class="nm">app:layout_constraintLeft_toLeftOf</span>=<span class="st">"parent"</span>
+    <span class="nm">app:layout_constraintRight_toRightOf</span>=<span class="st">"parent"</span><span class="at">&gt;</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="accordion" id="acc3">
+      <div class="accordion-header" onclick="toggleAccordion('acc3')">
+        <span>🌙 Theme Button — Top-right float, why only 2 constraints?</span>
+        <div class="accordion-arrow">▼</div>
+      </div>
+      <div class="accordion-body">
+        <div class="accordion-content">
+          <p>Unlike the display and grid, the theme button only needs <strong>top</strong> and <strong>right</strong> constraints — it's a floating button that doesn't need to stretch or participate in the layout flow.</p>
+          <div class="callout callout-warn">
+            <div class="callout-icon"></div>
+            <div>Note: <code>backgroundTint="@android:color/transparent"</code> removes the default Material button background, making it appear as a bare emoji icon. This is intentional — it keeps the UI clean.</div>
+          </div>
+          <div class="code-wrap">
+            <div class="code-header">
+              <div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div>
+              <span>activity_main.xml</span>
+              <button class="copy-btn" onclick="copyCode(this)">copy</button>
+            </div>
+            <pre><span class="at">&lt;Button</span>
+    <span class="nm">android:id</span>=<span class="st">"@+id/btnTheme"</span>
+    <span class="nm">android:layout_width</span>=<span class="st">"wrap_content"</span>
+    <span class="nm">android:backgroundTint</span>=<span class="st">"@android:color/transparent"</span>
+    <span class="nm">app:layout_constraintTop_toTopOf</span>=<span class="st">"parent"</span>
+    <span class="nm">app:layout_constraintRight_toRightOf</span>=<span class="st">"parent"</span>
+    <span class="nm">android:layout_marginTop</span>=<span class="st">"8dp"</span>
+    <span class="nm">android:layout_marginRight</span>=<span class="st">"8dp"</span><span class="at">/&gt;</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SECTION 2: ACTIVITY ── -->
+  <div class="section-card reveal" id="activity">
+    <span class="section-num">02 / MAINACTIVITY</span>
+    <h2>The Brain: State Variables</h2>
+    <p>The activity manages all calculator logic using five state variables. Understanding what each one does is key to understanding how the calculator works as a <span class="tip" data-tip="A system where the output depends on both the current input AND the history of past inputs. The calculator remembers what operation you pressed.">state machine</span>.</p>
+
+    <div class="code-wrap">
+      <div class="code-header">
+        <div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div>
+        <span>MainActivity.java — Field Declarations</span>
+        <button class="copy-btn" onclick="copyCode(this)">copy</button>
+      </div>
+      <pre><span class="kw">public class</span> <span class="cn">MainActivity</span> <span class="kw">extends</span> AppCompatActivity {
+
+    <span class="kw">private</span> ActivityMainBinding binding;       <span class="cm">// type-safe view references</span>
+    <span class="kw">private</span> String currentInput = <span class="st">""</span>;         <span class="cm">// digit string being built</span>
+    <span class="kw">private</span> String operator = <span class="st">""</span>;             <span class="cm">// pending +, -, *, /</span>
+    <span class="kw">private</span> <span class="kw">double</span> operandA = 0;              <span class="cm">// left-hand value</span>
+    <span class="kw">private</span> <span class="kw">boolean</span> isDarkMode = <span class="kw">true</span>;       <span class="cm">// current theme</span>
+    <span class="kw">private</span> <span class="kw">boolean</span> operatorClicked = false;  <span class="cm">// flag: fresh number needed</span>
+}</pre>
+    </div>
+
+    <h3>🧩 State Variable Roles</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Type</th><th>Purpose</th><th>Example Value</th></tr></thead>
+        <tbody>
+          <tr><td><code>currentInput</code></td><td>String</td><td>Digit characters being typed. String (not double) so we control decimals and display exactly.</td><td>"42.5"</td></tr>
+          <tr><td><code>operator</code></td><td>String</td><td>Stores which math operation is pending. Empty string means no pending op.</td><td>"+"</td></tr>
+          <tr><td><code>operandA</code></td><td>double</td><td>The left-hand number captured when user presses an operator button.</td><td>42.5</td></tr>
+          <tr><td><code>operatorClicked</code></td><td>boolean</td><td>True after an operator is pressed. Tells <code>appendNumber()</code> to start a fresh number rather than appending.</td><td>true</td></tr>
+          <tr><td><code>isDarkMode</code></td><td>boolean</td><td>Current theme state. Saved across rotation.</td><td>true</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-info">
+      <div class="callout-icon"></div>
+      <div><strong>Why store currentInput as String?</strong> If we stored it as a double, we'd lose control over how many decimal places display and couldn't tell the difference between "5" and "5.0". Strings let us append characters naturally and control the display exactly.</div>
+    </div>
+  </div>
+
+  <!-- ── SECTION 3: LIFECYCLE ── -->
+  <div class="section-card reveal" id="lifecycle">
+    <span class="section-num">03 / LIFECYCLE</span>
+    <h2>Surviving Rotation: <code>onSaveInstanceState</code></h2>
+    <p>When you rotate your phone, Android <strong>destroys and recreates</strong> the activity. Without saving state, every variable resets to its default — your mid-calculation data is gone.</p>
+
+    <div class="flow" style="flex-wrap:wrap; gap:8px; justify-content:center">
+      <div class="flow-step">User rotates phone</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step highlight-step">onSaveInstanceState()</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Activity destroyed</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Activity recreated</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step highlight-step">onCreate(bundle)</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">State restored ✓</div>
+    </div>
+
+    <div class="accordion" id="accSave">
+      <div class="accordion-header" onclick="toggleAccordion('accSave')">
+        <span>💾 Full save + restore code explained</span>
+        <div class="accordion-arrow">▼</div>
+      </div>
+      <div class="accordion-body">
+        <div class="accordion-content">
+          <div class="code-wrap">
+            <div class="code-header">
+              <div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div>
+              <span>onSaveInstanceState — writing to bundle</span>
+              <button class="copy-btn" onclick="copyCode(this)">copy</button>
+            </div>
+            <pre><span class="cm">// Called automatically by Android before destroying the activity</span>
+<span class="nm">@Override</span>
+<span class="kw">protected void</span> <span class="fn">onSaveInstanceState</span>(Bundle outState) {
+    <span class="kw">super</span>.<span class="fn">onSaveInstanceState</span>(outState);
+    outState.<span class="fn">putString</span>(<span class="st">"currentInput"</span>, currentInput);
+    outState.<span class="fn">putString</span>(<span class="st">"operator"</span>, operator);
+    outState.<span class="fn">putDouble</span>(<span class="st">"operandA"</span>, operandA);
+    outState.<span class="fn">putBoolean</span>(<span class="st">"isDarkMode"</span>, isDarkMode);
+    outState.<span class="fn">putBoolean</span>(<span class="st">"operatorClicked"</span>, operatorClicked);
+    outState.<span class="fn">putString</span>(<span class="st">"displayText"</span>, binding.tvDisplay.<span class="fn">getText</span>().<span class="fn">toString</span>());
+}</pre>
+          </div>
+          <div class="code-wrap">
+            <div class="code-header">
+              <div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div>
+              <span>onCreate — restoring from bundle</span>
+              <button class="copy-btn" onclick="copyCode(this)">copy</button>
+            </div>
+            <pre><span class="nm">@Override</span>
+<span class="kw">protected void</span> <span class="fn">onCreate</span>(Bundle savedInstanceState) {
+    <span class="kw">super</span>.<span class="fn">onCreate</span>(savedInstanceState);
+    binding = ActivityMainBinding.<span class="fn">inflate</span>(<span class="fn">getLayoutInflater</span>());
+    <span class="fn">setContentView</span>(binding.<span class="fn">getRoot</span>());
+
+    <span class="cm">// Bundle is null on first launch, non-null after rotation</span>
+    <span class="kw">if</span> (savedInstanceState != <span class="kw">null</span>) {
+        currentInput = savedInstanceState.<span class="fn">getString</span>(<span class="st">"currentInput"</span>, <span class="st">""</span>);
+        operator     = savedInstanceState.<span class="fn">getString</span>(<span class="st">"operator"</span>, <span class="st">""</span>);
+        operandA     = savedInstanceState.<span class="fn">getDouble</span>(<span class="st">"operandA"</span>, 0);
+        isDarkMode   = savedInstanceState.<span class="fn">getBoolean</span>(<span class="st">"isDarkMode"</span>, <span class="kw">true</span>);
+        operatorClicked = savedInstanceState.<span class="fn">getBoolean</span>(<span class="st">"operatorClicked"</span>, <span class="kw">false</span>);
+        binding.tvDisplay.<span class="fn">setText</span>(savedInstanceState.<span class="fn">getString</span>(<span class="st">"displayText"</span>, <span class="st">"0"</span>));
+    }
+}</pre>
+          </div>
+          <div class="callout callout-tip">
+            <div class="callout-icon"></div>
+            <div>The second argument in <code>getString("key", "defaultValue")</code> is the fallback if the key doesn't exist. Always provide sensible defaults so the app never crashes on first launch.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SECTION 4: METHODS (click grid) ── -->
+  <div class="section-card reveal" id="methods">
+    <span class="section-num">04 / METHODS</span>
+    <h2>Calculator Methods — Click to Explore</h2>
+    <p>Each button type maps to a dedicated method. Click any card to see the full code and explanation in a modal.</p>
+
+    <div class="method-grid">
+      <div class="method-card" onclick="openModal('appendNumber')">
+        <div class="method-name">appendNumber()</div>
+        <div class="method-trigger">0–9 buttons</div>
+        <div class="method-desc">Appends a digit to currentInput. Resets if operatorClicked is true.</div>
+      </div>
+      <div class="method-card" onclick="openModal('appendDecimal')">
+        <div class="method-name">appendDecimal()</div>
+        <div class="method-trigger">. button</div>
+        <div class="method-desc">Adds a decimal point, prevents duplicates, adds leading zero.</div>
+      </div>
+      <div class="method-card" onclick="openModal('setOperator')">
+        <div class="method-name">setOperator()</div>
+        <div class="method-trigger">+ − × ÷</div>
+        <div class="method-desc">Stores operandA and records which operator to use when = is pressed.</div>
+      </div>
+      <div class="method-card" onclick="openModal('calculate')">
+        <div class="method-name">calculate()</div>
+        <div class="method-trigger">= button</div>
+        <div class="method-desc">Performs arithmetic with division-by-zero guard. Formats result cleanly.</div>
+      </div>
+      <div class="method-card" onclick="openModal('clear')">
+        <div class="method-name">clear()</div>
+        <div class="method-trigger">AC button</div>
+        <div class="method-desc">Resets all state variables and sets display back to "0".</div>
+      </div>
+      <div class="method-card" onclick="openModal('toggleSign')">
+        <div class="method-name">toggleSign()</div>
+        <div class="method-trigger">+/− button</div>
+        <div class="method-desc">Flips the sign of the current number using string manipulation.</div>
+      </div>
+      <div class="method-card" onclick="openModal('percent')">
+        <div class="method-name">percent()</div>
+        <div class="method-trigger">% button</div>
+        <div class="method-desc">Divides current value by 100. Preserves integer display if result is whole.</div>
+      </div>
+      <div class="method-card" onclick="openModal('customOperator')">
+        <div class="method-name">customOperator()</div>
+        <div class="method-trigger">×1.08 button</div>
+        <div class="method-desc">Multiplies by 1.08 — an 8% VAT/tip calculator. Shows extensibility.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SECTION 5: SIMULATOR ── -->
+  <div class="section-card reveal" id="simulator">
+    <span class="section-num">05 / INTERACTIVE SIMULATOR</span>
+    <h2>Live Calculator + State Viewer</h2>
+    <p>This is the exact logic from <code>MainActivity.java</code> running in JavaScript. Watch the state variables update in real time as you press buttons.</p>
+
+    <div class="calc-sim">
+      <div class="calc-display">
+        <div class="calc-expr" id="simExpr"></div>
+        <div class="calc-val" id="simVal">0</div>
+      </div>
+      <div class="calc-grid">
+        <button class="calc-btn cbtn-fn" onclick="simFn('clear')">AC</button>
+        <button class="calc-btn cbtn-fn" onclick="simFn('sign')">+/−</button>
+        <button class="calc-btn cbtn-fn" onclick="simFn('pct')">%</button>
+        <button class="calc-btn cbtn-op" onclick="simOp('/')">÷</button>
+
+        <button class="calc-btn cbtn-num" onclick="simNum('7')">7</button>
+        <button class="calc-btn cbtn-num" onclick="simNum('8')">8</button>
+        <button class="calc-btn cbtn-num" onclick="simNum('9')">9</button>
+        <button class="calc-btn cbtn-op" onclick="simOp('*')">×</button>
+
+        <button class="calc-btn cbtn-num" onclick="simNum('4')">4</button>
+        <button class="calc-btn cbtn-num" onclick="simNum('5')">5</button>
+        <button class="calc-btn cbtn-num" onclick="simNum('6')">6</button>
+        <button class="calc-btn cbtn-op" onclick="simOp('-')">−</button>
+
+        <button class="calc-btn cbtn-num" onclick="simNum('1')">1</button>
+        <button class="calc-btn cbtn-num" onclick="simNum('2')">2</button>
+        <button class="calc-btn cbtn-num" onclick="simNum('3')">3</button>
+        <button class="calc-btn cbtn-op" onclick="simOp('+')">+</button>
+
+        <button class="calc-btn cbtn-custom" onclick="simFn('custom')">×1.08</button>
+        <button class="calc-btn cbtn-num" onclick="simNum('0')">0</button>
+        <button class="calc-btn cbtn-num" onclick="simNum('.')">.</button>
+        <button class="calc-btn cbtn-eq" onclick="simFn('eq')">=</button>
+      </div>
+
+      <div class="sim-log" id="simLog">
+        <div class="log-entry info">// Calculator ready. Press any button.</div>
+      </div>
+    </div>
+
+    <div class="state-tracker">
+      <div class="state-item"><div class="state-label">currentInput</div><div class="state-val" id="stCurrentInput">""</div></div>
+      <div class="state-item"><div class="state-label">operator</div><div class="state-val" id="stOperator">""</div></div>
+      <div class="state-item"><div class="state-label">operandA</div><div class="state-val" id="stOperandA">0</div></div>
+      <div class="state-item"><div class="state-label">operatorClicked</div><div class="state-val" id="stOpClicked">false</div></div>
+    </div>
+  </div>
+
+  <!-- ── SECTION 6: FULL CODE EXPLORER ── -->
+  <div class="section-card reveal">
+    <span class="section-num">06 / CODE EXPLORER</span>
+    <h2>Browse All Source Files</h2>
+
+    <div class="explorer">
+      <div class="explorer-tabs">
+        <button class="exp-tab active" onclick="switchTab(this,'tab-java')">MainActivity.java</button>
+        <button class="exp-tab" onclick="switchTab(this,'tab-xml')">activity_main.xml</button>
+        <button class="exp-tab" onclick="switchTab(this,'tab-calc')">calculate()</button>
+        <button class="exp-tab" onclick="switchTab(this,'tab-append')">appendNumber()</button>
+      </div>
+
+      <div class="exp-pane active" id="tab-java">
+        <pre style="padding:20px; font-family:var(--font-mono); font-size:12px; overflow-x:auto; line-height:1.6; color:#c9d1e0"><span class="kw">public class</span> <span class="cn">MainActivity</span> <span class="kw">extends</span> AppCompatActivity {
+
+    <span class="kw">private</span> ActivityMainBinding binding;
+    <span class="kw">private</span> String currentInput = <span class="st">""</span>;
+    <span class="kw">private</span> String operator = <span class="st">""</span>;
+    <span class="kw">private</span> <span class="kw">double</span> operandA = 0;
+    <span class="kw">private</span> <span class="kw">boolean</span> isDarkMode = <span class="kw">true</span>;
+    <span class="kw">private</span> <span class="kw">boolean</span> operatorClicked = <span class="kw">false</span>;
+
+    <span class="nm">@Override</span>
+    <span class="kw">protected void</span> <span class="fn">onCreate</span>(Bundle savedInstanceState) {
+        <span class="kw">super</span>.<span class="fn">onCreate</span>(savedInstanceState);
+        binding = ActivityMainBinding.<span class="fn">inflate</span>(<span class="fn">getLayoutInflater</span>());
+        <span class="fn">setContentView</span>(binding.<span class="fn">getRoot</span>());
+        <span class="kw">if</span> (savedInstanceState != <span class="kw">null</span>) {
+            currentInput    = savedInstanceState.<span class="fn">getString</span>(<span class="st">"currentInput"</span>, <span class="st">""</span>);
+            operator        = savedInstanceState.<span class="fn">getString</span>(<span class="st">"operator"</span>, <span class="st">""</span>);
+            operandA        = savedInstanceState.<span class="fn">getDouble</span>(<span class="st">"operandA"</span>, 0);
+            isDarkMode      = savedInstanceState.<span class="fn">getBoolean</span>(<span class="st">"isDarkMode"</span>, <span class="kw">true</span>);
+            operatorClicked = savedInstanceState.<span class="fn">getBoolean</span>(<span class="st">"operatorClicked"</span>, <span class="kw">false</span>);
+            binding.tvDisplay.<span class="fn">setText</span>(savedInstanceState.<span class="fn">getString</span>(<span class="st">"displayText"</span>, <span class="st">"0"</span>));
+        }
+        <span class="fn">setupButtons</span>();
+        <span class="fn">applyTheme</span>();
+    }
+    <span class="cm">// ... (see other tabs)</span>
+}</pre>
+      </div>
+
+      <div class="exp-pane" id="tab-xml">
+        <pre style="padding:20px; font-family:var(--font-mono); font-size:12px; overflow-x:auto; line-height:1.6; color:#c9d1e0"><span class="at">&lt;androidx.constraintlayout.widget.ConstraintLayout</span>
+    <span class="nm">android:id</span>=<span class="st">"@+id/rootLayout"</span>
+    <span class="nm">android:layout_width</span>=<span class="st">"match_parent"</span>
+    <span class="nm">android:layout_height</span>=<span class="st">"match_parent"</span><span class="at">&gt;</span>
+
+    <span class="at">&lt;TextView</span>
+        <span class="nm">android:id</span>=<span class="st">"@+id/tvDisplay"</span>
+        <span class="nm">android:layout_width</span>=<span class="st">"0dp"</span>
+        <span class="nm">android:layout_height</span>=<span class="st">"wrap_content"</span>
+        <span class="nm">android:textSize</span>=<span class="st">"48sp"</span>
+        <span class="nm">android:gravity</span>=<span class="st">"end"</span>
+        <span class="nm">android:maxLines</span>=<span class="st">"2"</span>
+        <span class="nm">android:ellipsize</span>=<span class="st">"start"</span>
+        <span class="nm">app:layout_constraintTop_toTopOf</span>=<span class="st">"parent"</span>
+        <span class="nm">app:layout_constraintLeft_toLeftOf</span>=<span class="st">"parent"</span>
+        <span class="nm">app:layout_constraintRight_toRightOf</span>=<span class="st">"parent"</span><span class="at">/&gt;</span>
+
+    <span class="at">&lt;GridLayout</span>
+        <span class="nm">android:id</span>=<span class="st">"@+id/gridButtons"</span>
+        <span class="nm">android:layout_width</span>=<span class="st">"0dp"</span>
+        <span class="nm">android:layout_height</span>=<span class="st">"0dp"</span>
+        <span class="nm">android:columnCount</span>=<span class="st">"4"</span>
+        <span class="nm">android:rowCount</span>=<span class="st">"6"</span>
+        <span class="nm">app:layout_constraintTop_toBottomOf</span>=<span class="st">"@id/tvDisplay"</span>
+        <span class="nm">app:layout_constraintBottom_toBottomOf</span>=<span class="st">"parent"</span>
+        <span class="nm">app:layout_constraintLeft_toLeftOf</span>=<span class="st">"parent"</span>
+        <span class="nm">app:layout_constraintRight_toRightOf</span>=<span class="st">"parent"</span><span class="at">&gt;</span>
+        <span class="cm">&lt;!-- 20 buttons here --&gt;</span>
+    <span class="at">&lt;/GridLayout&gt;</span>
+
+<span class="at">&lt;/androidx.constraintlayout.widget.ConstraintLayout&gt;</span></pre>
+      </div>
+
+      <div class="exp-pane" id="tab-calc">
+        <pre style="padding:20px; font-family:var(--font-mono); font-size:12px; overflow-x:auto; line-height:1.6; color:#c9d1e0"><span class="kw">private void</span> <span class="fn">calculate</span>() {
+    <span class="cm">// Guard: need both operator and a second operand</span>
+    <span class="kw">if</span> (operator.<span class="fn">isEmpty</span>() || currentInput.<span class="fn">isEmpty</span>()) <span class="kw">return</span>;
+
+    <span class="kw">double</span> operandB = Double.<span class="fn">parseDouble</span>(currentInput);
+    <span class="kw">double</span> result = 0;
+
+    <span class="kw">switch</span> (operator) {
+        <span class="kw">case</span> <span class="st">"+"</span>: result = operandA + operandB; <span class="kw">break</span>;
+        <span class="kw">case</span> <span class="st">"-"</span>: result = operandA - operandB; <span class="kw">break</span>;
+        <span class="kw">case</span> <span class="st">"*"</span>: result = operandA * operandB; <span class="kw">break</span>;
+        <span class="kw">case</span> <span class="st">"/"</span>:
+            <span class="kw">if</span> (operandB == 0) {
+                binding.tvDisplay.<span class="fn">setText</span>(<span class="st">"Cannot divide by zero"</span>);
+                currentInput = <span class="st">""</span>;
+                operator = <span class="st">""</span>;
+                <span class="kw">return</span>;          <span class="cm">// early exit, no crash</span>
+            }
+            result = operandA / operandB;
+            <span class="kw">break</span>;
+    }
+
+    <span class="cm">// Clean display: show "5" not "5.0"</span>
+    <span class="kw">if</span> (result == (<span class="kw">long</span>) result) {
+        currentInput = String.<span class="fn">valueOf</span>((<span class="kw">long</span>) result);
+    } <span class="kw">else</span> {
+        currentInput = String.<span class="fn">valueOf</span>(result);
+    }
+
+    binding.tvDisplay.<span class="fn">setText</span>(currentInput);
+    operator = <span class="st">""</span>;
+    operatorClicked = <span class="kw">true</span>;   <span class="cm">// next digit starts fresh</span>
+}</pre>
+      </div>
+
+      <div class="exp-pane" id="tab-append">
+        <pre style="padding:20px; font-family:var(--font-mono); font-size:12px; overflow-x:auto; line-height:1.6; color:#c9d1e0"><span class="kw">private void</span> <span class="fn">appendNumber</span>(String num) {
+    <span class="cm">// After pressing an operator, the next digit starts fresh</span>
+    <span class="kw">if</span> (operatorClicked) {
+        currentInput = <span class="st">""</span>;
+        operatorClicked = <span class="kw">false</span>;
+    }
+    currentInput += num;
+    binding.tvDisplay.<span class="fn">setText</span>(currentInput);
+}
+
+<span class="kw">private void</span> <span class="fn">appendDecimal</span>() {
+    <span class="cm">// If just pressed operator, start "0."</span>
+    <span class="kw">if</span> (operatorClicked) {
+        currentInput = <span class="st">"0"</span>;
+        operatorClicked = <span class="kw">false</span>;
+    }
+    <span class="cm">// Prevent "42..5" — only add if no dot yet</span>
+    <span class="kw">if</span> (!currentInput.<span class="fn">contains</span>(<span class="st">"."</span>)) {
+        <span class="kw">if</span> (currentInput.<span class="fn">isEmpty</span>()) currentInput = <span class="st">"0"</span>;  <span class="cm">// "." → "0."</span>
+        currentInput += <span class="st">"."</span>;
+        binding.tvDisplay.<span class="fn">setText</span>(currentInput);
+    }
+}</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SECTION 7: THEME ── -->
+  <div class="section-card reveal" id="theme">
+    <span class="section-num">07 / THEME TOGGLE</span>
+    <h2>Dynamic Dark / Light Mode</h2>
+    <p>Instead of recreating the activity with a new theme resource, the app changes colors <strong>at runtime</strong> using <code>setBackgroundColor()</code> and <code>setTextColor()</code>. This gives an instant, seamless switch.</p>
+
+    <div class="code-wrap">
+      <div class="code-header">
+        <div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div>
+        <span>applyTheme() — runtime color switching</span>
+        <button class="copy-btn" onclick="copyCode(this)">copy</button>
+      </div>
+      <pre><span class="kw">private void</span> <span class="fn">applyTheme</span>() {
+    <span class="kw">if</span> (isDarkMode) {
+        binding.rootLayout.<span class="fn">setBackgroundColor</span>(<span class="fn">getColor</span>(R.color.calc_background_dark));
+        binding.tvDisplay.<span class="fn">setTextColor</span>(<span class="fn">getColor</span>(R.color.calc_text_dark));
+        binding.btnTheme.<span class="fn">setText</span>(<span class="st">"🌙"</span>);
+    } <span class="kw">else</span> {
+        binding.rootLayout.<span class="fn">setBackgroundColor</span>(<span class="fn">getColor</span>(R.color.calc_background_light));
+        binding.tvDisplay.<span class="fn">setTextColor</span>(<span class="fn">getColor</span>(R.color.calc_text_light));
+        binding.btnTheme.<span class="fn">setText</span>(<span class="st">"☀️"</span>);
+    }
+}</pre>
+    </div>
+
+    <div class="callout callout-info">
+      <div class="callout-icon"></div>
+      <div><strong>Why not use <code>recreate()</code>?</strong> Calling <code>recreate()</code> would restart the activity, triggering a flash and potentially losing state mid-calculation. Direct color setting is instant and keeps the app in the exact same state.</div>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon"></div>
+      <div>Because <code>isDarkMode</code> is saved in <code>onSaveInstanceState</code>, the theme persists even after screen rotation — then <code>applyTheme()</code> is called in <code>onCreate</code> to re-apply it.</div>
+    </div>
+  </div>
+
+  <!-- ── SECTION 8: QUIZ ── -->
+  <div class="section-card reveal" id="quiz">
+    <span class="section-num">08 / KNOWLEDGE CHECK</span>
+    <h2>Test Yourself</h2>
+
+    <div class="quiz-wrap">
+      <div class="quiz-q">1. Why is <code>layout_width="0dp"</code> used for <code>tvDisplay</code>?</div>
+      <div class="quiz-options">
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q1')"><div class="quiz-badge">A</div>It makes the view invisible</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, true, 'q1')"><div class="quiz-badge">B</div>It means "match constraint" — stretch between left and right constraints</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q1')"><div class="quiz-badge">C</div>It's required for TextViews to show text</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q1')"><div class="quiz-badge">D</div>It sets a fixed 0px width</div>
+      </div>
+      <div class="quiz-feedback" id="q1">
+        ✓ Correct! In ConstraintLayout, <code>0dp</code> means "match constraint" — the view fills the space defined by its opposing constraints. Since both left and right are anchored to parent, it becomes full width on any screen.
+      </div>
+    </div>
+
+    <div class="quiz-wrap">
+      <div class="quiz-q">2. What happens if you DON'T implement <code>onSaveInstanceState</code>?</div>
+      <div class="quiz-options">
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q2')"><div class="quiz-badge">A</div>The app crashes immediately</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q2')"><div class="quiz-badge">B</div>The theme toggle stops working</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, true, 'q2')"><div class="quiz-badge">C</div>Rotating the screen resets all calculator state (display, operands, operator)</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q2')"><div class="quiz-badge">D</div>Nothing — Android saves state automatically</div>
+      </div>
+      <div class="quiz-feedback" id="q2">
+        ✓ Correct! Android destroys and recreates the activity on rotation. Without saving state, all Java fields reset to defaults — display shows "0", any mid-calculation is lost.
+      </div>
+    </div>
+
+    <div class="quiz-wrap">
+      <div class="quiz-q">3. What is the purpose of the <code>operatorClicked</code> flag?</div>
+      <div class="quiz-options">
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q3')"><div class="quiz-badge">A</div>It tracks which operator button was pressed last</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q3')"><div class="quiz-badge">B</div>It prevents the operator buttons from being clicked twice</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, true, 'q3')"><div class="quiz-badge">C</div>It tells appendNumber() to start fresh instead of appending to the previous number</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q3')"><div class="quiz-badge">D</div>It enables the = button</div>
+      </div>
+      <div class="quiz-feedback" id="q3">
+        ✓ Correct! After pressing +, the next digit press should start a new number — not append to operandA. The flag signals this: if true, <code>appendNumber()</code> clears <code>currentInput</code> first.
+      </div>
+    </div>
+
+    <div class="quiz-wrap">
+      <div class="quiz-q">4. What does <code>if (result == (long) result)</code> achieve?</div>
+      <div class="quiz-options">
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q4')"><div class="quiz-badge">A</div>It checks if the result is negative</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, true, 'q4')"><div class="quiz-badge">B</div>It detects whole numbers so "5" displays instead of "5.0"</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q4')"><div class="quiz-badge">C</div>It rounds the result to the nearest integer</div>
+        <div class="quiz-opt" onclick="quizAnswer(this, false, 'q4')"><div class="quiz-badge">D</div>It converts the result to a long for storage</div>
+      </div>
+      <div class="quiz-feedback" id="q4">
+        ✓ Correct! Casting a double to long truncates the decimal. If the result equals its truncated self (e.g., 5.0 == 5), it has no meaningful decimal part, so we display the cleaner integer form.
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="footer-label">// END OF FILE</div>
+    <p>Android Calculator Deep Dive — Layout + Logic + Lifecycle</p>
+    <p style="margin-top:6px; font-size:11px;">Built for learning Android fundamentals. Every constraint, every method, explained.</p>
+  </footer>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- MODAL DATA -->
+<script>
+const methodData = {
+  appendNumber: {
+    trigger: "0–9 buttons",
+    title: "appendNumber(String num)",
+    body: `
+      <p>Called every time a digit button is pressed. It handles two distinct scenarios based on the <code>operatorClicked</code> flag.</p>
+      <div class="code-wrap">
+        <div class="code-header"><div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div><span>appendNumber</span></div>
+        <pre class="kw">private void <span class="fn">appendNumber</span>(String num) {
+    <span class="cm">// Flag is true right after an operator is pressed</span>
+    <span class="kw">if</span> (operatorClicked) {
+        currentInput = "";     <span class="cm">← discard operandA display</span>
+        operatorClicked = false;
+    }
+    currentInput += num;       <span class="cm">← build the digit string</span>
+    binding.tvDisplay.setText(currentInput);
+}</pre>
+      </div>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px;color:var(--accent3)">🔁 The Flag Mechanism Explained</h3>
+      <p>Consider the sequence: <strong>press 5 → press + → press 3</strong></p>
+      <div class="flow" style="flex-wrap:wrap;gap:8px">
+        <div class="flow-step">5 pressed<br><small>currentInput="5"</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight-step">+ pressed<br><small>operandA=5, flag=true</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">3 pressed<br><small>flag=true → reset to ""</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">currentInput="3" ✓</div>
+      </div>
+      <p style="margin-top:14px">Without the flag, pressing 3 after 5+ would give <code>currentInput="53"</code> instead of <code>"3"</code>.</p>
+    `
+  },
+  appendDecimal: {
+    trigger: ". button",
+    title: "appendDecimal()",
+    body: `
+      <p>Handles the decimal point button with two important safeguards.</p>
+      <div class="code-wrap">
+        <div class="code-header"><div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div><span>appendDecimal</span></div>
+        <pre><span class="kw">private void</span> appendDecimal() {
+    <span class="kw">if</span> (operatorClicked) {
+        currentInput = <span class="st">"0"</span>;     <span class="cm">← "0." not just "."</span>
+        operatorClicked = <span class="kw">false</span>;
+    }
+    <span class="kw">if</span> (!currentInput.contains(<span class="st">"."</span>)) {
+        <span class="kw">if</span> (currentInput.isEmpty()) currentInput = <span class="st">"0"</span>; <span class="cm">← leading zero</span>
+        currentInput += <span class="st">"."</span>;
+        binding.tvDisplay.setText(currentInput);
+    }
+    <span class="cm">// If already contains ".", do nothing</span>
+}</pre>
+      </div>
+      <div class="callout callout-info" style="margin-top:14px">
+        <div class="callout-icon"></div>
+        <div><strong>Safeguard 1:</strong> <code>!currentInput.contains(".")</code> — prevents "42..5". Only one decimal per number.<br><br><strong>Safeguard 2:</strong> If input is empty, prepend "0" — so pressing "." gives "0." not just "." which would be invalid.</div>
+      </div>
+    `
+  },
+  setOperator: {
+    trigger: "+ − × ÷",
+    title: "setOperator(String op)",
+    body: `
+      <p>This is the "commit first number" step in a two-operand calculation.</p>
+      <div class="code-wrap">
+        <div class="code-header"><div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div><span>setOperator</span></div>
+        <pre><span class="kw">private void</span> setOperator(String op) {
+    <span class="kw">if</span> (!currentInput.isEmpty()) {
+        operandA = Double.parseDouble(currentInput);
+    }
+    operator = op;
+    operatorClicked = <span class="kw">true</span>;
+}</pre>
+      </div>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px;color:var(--accent3)">📌 Three things happen here:</h3>
+      <ol style="margin-left:1.5rem;line-height:2;color:#b8c5d5">
+        <li>The current display value is saved as <code>operandA</code> (the left-hand number)</li>
+        <li>The operator symbol is stored for use in <code>calculate()</code></li>
+        <li><code>operatorClicked = true</code> — the next digit press will start a fresh <code>currentInput</code></li>
+      </ol>
+      <div class="callout callout-warn" style="margin-top:14px">
+        <div class="callout-icon"></div>
+        <div>Note that <code>currentInput</code> is NOT cleared here — the display still shows <code>operandA</code>'s value. This is the standard calculator UX: you see the first number until you start typing the second one.</div>
+      </div>
+    `
+  },
+  calculate: {
+    trigger: "= button",
+    title: "calculate()",
+    body: `
+      <p>The core arithmetic engine. Combines operandA (set by setOperator) with operandB (current input) using the stored operator.</p>
+      <div class="code-wrap">
+        <div class="code-header"><div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div><span>calculate</span></div>
+        <pre><span class="kw">private void</span> calculate() {
+    <span class="kw">if</span> (operator.isEmpty() || currentInput.isEmpty()) <span class="kw">return</span>;
+
+    <span class="kw">double</span> operandB = Double.parseDouble(currentInput);
+    <span class="kw">double</span> result = 0;
+
+    <span class="kw">switch</span> (operator) {
+        <span class="kw">case</span> <span class="st">"+"</span>: result = operandA + operandB; <span class="kw">break</span>;
+        <span class="kw">case</span> <span class="st">"-"</span>: result = operandA - operandB; <span class="kw">break</span>;
+        <span class="kw">case</span> <span class="st">"*"</span>: result = operandA * operandB; <span class="kw">break</span>;
+        <span class="kw">case</span> <span class="st">"/"</span>:
+            <span class="kw">if</span> (operandB == 0) {
+                binding.tvDisplay.setText(<span class="st">"Cannot divide by zero"</span>);
+                currentInput = <span class="st">""</span>; operator = <span class="st">""</span>;
+                <span class="kw">return</span>;
+            }
+            result = operandA / operandB; <span class="kw">break</span>;
+    }
+    <span class="cm">// Clean display: "5" not "5.0"</span>
+    <span class="kw">if</span> (result == (<span class="kw">long</span>) result) {
+        currentInput = String.valueOf((<span class="kw">long</span>) result);
+    } <span class="kw">else</span> {
+        currentInput = String.valueOf(result);
+    }
+    binding.tvDisplay.setText(currentInput);
+    operator = <span class="st">""</span>;
+    operatorClicked = <span class="kw">true</span>;
+}</pre>
+      </div>
+      <div class="callout callout-tip" style="margin-top:14px">
+        <div class="callout-icon"></div>
+        <div><strong>Division by zero guard:</strong> Rather than crashing or showing NaN/Infinity, the app shows a user-friendly message and resets state. <code>return</code> exits early before any result is displayed.</div>
+      </div>
+      <div class="callout callout-info" style="margin-top:10px">
+        <div class="callout-icon"></div>
+        <div><strong>Integer formatting trick:</strong> <code>result == (long) result</code> checks if the double has no fractional part. 5.0 cast to long is 5, and 5.0 == 5 is true, so we display "5" instead of "5.0". </div>
+      </div>
+    `
+  },
+  clear: {
+    trigger: "AC button",
+    title: "clear()",
+    body: `
+      <p>The nuclear reset. Wipes all state and returns the calculator to its initial condition.</p>
+      <div class="code-wrap">
+        <div class="code-header"><div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div><span>clear</span></div>
+        <pre><span class="kw">private void</span> clear() {
+    currentInput = <span class="st">""</span>;
+    operator = <span class="st">""</span>;
+    operandA = 0;
+    operatorClicked = <span class="kw">false</span>;
+    binding.tvDisplay.setText(<span class="st">"0"</span>);
+}</pre>
+      </div>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px;color:var(--accent3)">🔍 What each reset does:</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Variable</th><th>Reset to</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td><code>currentInput</code></td><td>""</td><td>No digits in buffer</td></tr>
+            <tr><td><code>operator</code></td><td>""</td><td>No pending operation</td></tr>
+            <tr><td><code>operandA</code></td><td>0</td><td>No stored left-hand value</td></tr>
+            <tr><td><code>operatorClicked</code></td><td>false</td><td>Next digit appends normally</td></tr>
+            <tr><td>display</td><td>"0"</td><td>Standard initial state</td></tr>
+          </tbody>
+        </table>
+      </div>
+    `
+  },
+  toggleSign: {
+    trigger: "+/− button",
+    title: "toggleSign()",
+    body: `
+      <p>Negates the current display value using simple string manipulation — no Math.abs() or multiplication needed.</p>
+      <div class="code-wrap">
+        <div class="code-header"><div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div><span>toggleSign</span></div>
+        <pre><span class="kw">private void</span> toggleSign() {
+    <span class="kw">if</span> (!currentInput.isEmpty() && !currentInput.equals(<span class="st">"0"</span>)) {
+        <span class="kw">if</span> (currentInput.startsWith(<span class="st">"-"</span>)) {
+            <span class="cm">// Already negative → remove the "-"</span>
+            currentInput = currentInput.substring(1);
+        } <span class="kw">else</span> {
+            <span class="cm">// Positive → prepend "-"</span>
+            currentInput = <span class="st">"-"</span> + currentInput;
+        }
+        binding.tvDisplay.setText(currentInput);
+    }
+}</pre>
+      </div>
+      <div class="callout callout-info" style="margin-top:14px">
+        <div class="callout-icon"></div>
+        <div><strong>String approach vs math:</strong> Using <code>startsWith("-")</code> is cleaner than <code>parseDouble * -1</code> because it avoids floating point precision issues and preserves the exact string representation (e.g., doesn't turn "42." into "-42.0").</div>
+      </div>
+    `
+  },
+  percent: {
+    trigger: "% button",
+    title: "percent()",
+    body: `
+      <p>Divides the current value by 100 and applies the same integer formatting as <code>calculate()</code>.</p>
+      <div class="code-wrap">
+        <div class="code-header"><div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div><span>percent</span></div>
+        <pre><span class="kw">private void</span> percent() {
+    <span class="kw">if</span> (!currentInput.isEmpty()) {
+        <span class="kw">double</span> value = Double.parseDouble(currentInput) / 100;
+        <span class="kw">if</span> (value == (<span class="kw">long</span>) value) {
+            currentInput = String.valueOf((<span class="kw">long</span>) value);
+        } <span class="kw">else</span> {
+            currentInput = String.valueOf(value);
+        }
+        binding.tvDisplay.setText(currentInput);
+    }
+}</pre>
+      </div>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px;color:var(--accent3)">Examples:</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Input</th><th>After %</th><th>Display</th></tr></thead>
+          <tbody>
+            <tr><td>100</td><td>1.0</td><td>"1"</td></tr>
+            <tr><td>50</td><td>0.5</td><td>"0.5"</td></tr>
+            <tr><td>200</td><td>2.0</td><td>"2"</td></tr>
+          </tbody>
+        </table>
+      </div>
+    `
+  },
+  customOperator: {
+    trigger: "×1.08 button",
+    title: "customOperator() — ×1.08",
+    body: `
+      <p>A unique feature that multiplies the current value by 1.08 — instantly adding 8% (like a VAT or service charge). It demonstrates how easily new operations can be added to the calculator's architecture.</p>
+      <div class="code-wrap">
+        <div class="code-header"><div class="code-dots"><span class="code-dot dot-r"></span><span class="code-dot dot-y"></span><span class="code-dot dot-g"></span></div><span>customOperator</span></div>
+        <pre><span class="kw">private void</span> customOperator() {
+    <span class="kw">if</span> (!currentInput.isEmpty()) {
+        <span class="kw">double</span> value = Double.parseDouble(currentInput) * 1.08;
+        <span class="kw">if</span> (value == (<span class="kw">long</span>) value) {
+            currentInput = String.valueOf((<span class="kw">long</span>) value);
+        } <span class="kw">else</span> {
+            currentInput = String.valueOf(value);
+        }
+        binding.tvDisplay.setText(currentInput);
+    }
+}</pre>
+      </div>
+      <div class="callout callout-tip" style="margin-top:14px">
+        <div class="callout-icon"></div>
+        <div><strong>Extensibility insight:</strong> Adding a new operation is as simple as: (1) add a button in XML, (2) bind it in <code>setupButtons()</code>, (3) write a single method. The architecture cleanly supports this without modifying any existing code.</div>
+      </div>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px;color:var(--accent3)">Examples:</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Input</th><th>Result (×1.08)</th><th>Use case</th></tr></thead>
+          <tbody>
+            <tr><td>100</td><td>108</td><td>₱100 + 8% VAT = ₱108</td></tr>
+            <tr><td>250</td><td>270</td><td>₱250 + 8% = ₱270</td></tr>
+            <tr><td>1000</td><td>1080</td><td>₱1000 + 8% = ₱1080</td></tr>
+          </tbody>
+        </table>
+      </div>
+    `
+  }
+};
+
+// ── MODAL ──
+function openModal(key) {
+  const d = methodData[key];
+  document.getElementById('modalTrigger').textContent = d.trigger;
+  document.getElementById('modalTitle').textContent = d.title;
+  document.getElementById('modalBody').innerHTML = d.body;
+  document.getElementById('methodModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeModal() {
+  document.getElementById('methodModal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.getElementById('methodModal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('methodModal')) closeModal();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+// ── ACCORDION ──
+function toggleAccordion(id) {
+  const el = document.getElementById(id);
+  const wasOpen = el.classList.contains('open');
+  el.classList.toggle('open', !wasOpen);
+}
+
+// ── TABS ──
+function switchTab(btn, tabId) {
+  btn.closest('.explorer').querySelectorAll('.exp-tab').forEach(t => t.classList.remove('active'));
+  btn.closest('.explorer').querySelectorAll('.exp-pane').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(tabId).classList.add('active');
+}
+
+// ── COPY CODE ──
+function copyCode(btn) {
+  const pre = btn.closest('.code-wrap').querySelector('pre');
+  const text = pre.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'copied!';
+    btn.style.color = 'var(--accent3)';
+    setTimeout(() => { btn.textContent = 'copy'; btn.style.color = ''; }, 1500);
+  });
+}
+
+// ── QUIZ ──
+function quizAnswer(el, correct, qid) {
+  const wrap = el.closest('.quiz-wrap');
+  if (wrap.dataset.answered) return;
+  wrap.dataset.answered = '1';
+  const opts = wrap.querySelectorAll('.quiz-opt');
+  opts.forEach(o => o.style.pointerEvents = 'none');
+  el.classList.add(correct ? 'correct' : 'wrong');
+  if (!correct) {
+    opts.forEach(o => { if (o !== el) o.style.opacity = '0.45'; });
+  }
+  const fb = document.getElementById(qid);
+  fb.classList.add('show', correct ? 'ok' : 'bad');
+  if (!correct) fb.textContent = '✗ Not quite. The correct answer is B — 0dp in ConstraintLayout means "match constraint", not a fixed 0px width.';
+}
+
+// ── SIMULATOR ──
+let simState = { currentInput: '', operator: '', operandA: 0, operatorClicked: false };
+
+function updateSimDisplay() {
+  const val = simState.currentInput || '0';
+  document.getElementById('simVal').textContent = val;
+  if (simState.operator && !simState.operatorClicked) {
+    document.getElementById('simExpr').textContent = simState.operandA + ' ' + simState.operator;
+  } else if (simState.operator && simState.operatorClicked) {
+    document.getElementById('simExpr').textContent = simState.operandA + ' ' + simState.operator;
+  } else {
+    document.getElementById('simExpr').textContent = '';
+  }
+  document.getElementById('stCurrentInput').textContent = '"' + simState.currentInput + '"';
+  document.getElementById('stOperator').textContent = '"' + simState.operator + '"';
+  document.getElementById('stOperandA').textContent = simState.operandA;
+  document.getElementById('stOpClicked').textContent = simState.operatorClicked;
+}
+
+function simLog(msg, type='') {
+  const log = document.getElementById('simLog');
+  const d = document.createElement('div');
+  d.className = 'log-entry ' + type;
+  d.textContent = '→ ' + msg;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+function simNum(n) {
+  if (n === '.') {
+    if (simState.operatorClicked) { simState.currentInput = '0'; simState.operatorClicked = false; }
+    if (!simState.currentInput.includes('.')) {
+      if (!simState.currentInput) simState.currentInput = '0';
+      simState.currentInput += '.';
+      simLog('appendDecimal() → "' + simState.currentInput + '"', 'info');
+    }
+  } else {
+    if (simState.operatorClicked) { simState.currentInput = ''; simState.operatorClicked = false; }
+    simState.currentInput += n;
+    simLog('appendNumber("' + n + '") → currentInput="' + simState.currentInput + '"', 'info');
+  }
+  updateSimDisplay();
+}
+
+function simOp(op) {
+  if (simState.currentInput) simState.operandA = parseFloat(simState.currentInput);
+  simState.operator = op;
+  simState.operatorClicked = true;
+  simLog('setOperator("' + op + '") — operandA=' + simState.operandA + ', flag=true', 'warn');
+  updateSimDisplay();
+}
+
+function simFn(fn) {
+  if (fn === 'clear') {
+    simState = { currentInput: '', operator: '', operandA: 0, operatorClicked: false };
+    document.getElementById('simVal').textContent = '0';
+    document.getElementById('simExpr').textContent = '';
+    simLog('clear() — all state reset', 'warn');
+  } else if (fn === 'sign') {
+    if (simState.currentInput && simState.currentInput !== '0') {
+      simState.currentInput = simState.currentInput.startsWith('-')
+        ? simState.currentInput.slice(1)
+        : '-' + simState.currentInput;
+      simLog('toggleSign() → "' + simState.currentInput + '"', 'info');
+    }
+  } else if (fn === 'pct') {
+    if (simState.currentInput) {
+      let v = parseFloat(simState.currentInput) / 100;
+      simState.currentInput = v === Math.trunc(v) ? String(Math.trunc(v)) : String(v);
+      simLog('percent() → "' + simState.currentInput + '"', 'info');
+    }
+  } else if (fn === 'eq') {
+    if (!simState.operator || !simState.currentInput) { simLog('calculate() — skipped (no operator or input)', 'warn'); return; }
+    const b = parseFloat(simState.currentInput);
+    let result;
+    if (simState.operator === '+') result = simState.operandA + b;
+    else if (simState.operator === '-') result = simState.operandA - b;
+    else if (simState.operator === '*') result = simState.operandA * b;
+    else if (simState.operator === '/') {
+      if (b === 0) { document.getElementById('simVal').textContent = 'Cannot divide by zero'; simLog('calculate() — division by zero!', 'warn'); simState.currentInput = ''; simState.operator = ''; return; }
+      result = simState.operandA / b;
+    }
+    const display = result === Math.trunc(result) ? String(Math.trunc(result)) : String(result);
+    simLog('calculate() → ' + simState.operandA + ' ' + simState.operator + ' ' + b + ' = ' + display);
+    simState.currentInput = display;
+    simState.operator = '';
+    simState.operatorClicked = true;
+  } else if (fn === 'custom') {
+    if (simState.currentInput) {
+      let v = parseFloat(simState.currentInput) * 1.08;
+      simState.currentInput = v === Math.trunc(v) ? String(Math.trunc(v)) : parseFloat(v.toFixed(4)).toString();
+      simLog('customOperator() ×1.08 → "' + simState.currentInput + '"', 'info');
+    }
+  }
+  updateSimDisplay();
+}
+
+// ── PROGRESS BAR ──
+window.addEventListener('scroll', () => {
+  const bar = document.getElementById('progressBar');
+  const pct = window.scrollY / (document.body.scrollHeight - window.innerHeight) * 100;
+  bar.style.width = pct + '%';
+});
+
+// ── SCROLL REVEAL ──
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.08 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// ── NAV PILL HIGHLIGHT ──
+const sections = document.querySelectorAll('[id]');
+const pills = document.querySelectorAll('.nav-pill');
+window.addEventListener('scroll', () => {
+  let cur = '';
+  sections.forEach(s => { if (window.scrollY >= s.offsetTop - 120) cur = s.id; });
+  pills.forEach(p => {
+    p.classList.toggle('active', p.getAttribute('href') === '#' + cur);
+  });
+});
+</script>
+</body>
+</html>
